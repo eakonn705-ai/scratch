@@ -3,92 +3,308 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scratch Cloud Connector</title>
+<title>Scratch クラウド変数履歴ビューア</title>
 <style>
-body{font-family:sans-serif;max-width:900px;margin:20px auto;padding:20px}
-input,button{padding:8px;margin:4px;width:100%}
-#log{height:300px;overflow:auto;border:1px solid #ccc;padding:10px}
+  :root {
+    --bg: #1a1a2e;
+    --panel: #22243a;
+    --accent: #4cc9f0;
+    --accent2: #f72585;
+    --text: #eaeaea;
+    --sub: #9a9ac0;
+    --border: #33344f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin-bottom: 4px;
+    color: var(--accent);
+  }
+  .desc {
+    color: var(--sub);
+    font-size: 0.85rem;
+    margin-bottom: 20px;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    background: var(--panel);
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .controls label {
+    font-size: 0.8rem;
+    color: var(--sub);
+    display: block;
+    margin-bottom: 4px;
+  }
+  .field { flex: 1 1 140px; }
+  input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #11121f;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  input:focus { outline: 1px solid var(--accent); }
+  button {
+    align-self: flex-end;
+    padding: 9px 20px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #06121a;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: filter 0.15s;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #status {
+    font-size: 0.85rem;
+    color: var(--sub);
+    margin-bottom: 12px;
+    min-height: 1.2em;
+  }
+  #status.error { color: var(--accent2); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  thead th {
+    text-align: left;
+    padding: 10px 12px;
+    background: #2a2c46;
+    font-size: 0.8rem;
+    color: var(--sub);
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td {
+    padding: 9px 12px;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: rgba(76, 201, 240, 0.07); }
+  .verb-set { color: var(--accent); }
+  .verb-create { color: #7bf1a8; }
+  .verb-del { color: var(--accent2); }
+  .mono { font-family: "Consolas", "Menlo", monospace; }
+  .empty {
+    text-align: center;
+    padding: 30px;
+    color: var(--sub);
+  }
+  .raw-toggle {
+    margin: 14px 0 6px;
+    font-size: 0.8rem;
+    color: var(--sub);
+    cursor: pointer;
+    user-select: none;
+  }
+  .raw-toggle:hover { color: var(--accent); }
+  pre#rawOutput {
+    display: none;
+    background: #11121f;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
 </style>
 </head>
 <body>
-<h1>Scratch Cloud Connector (JS版)</h1>
+<div class="container">
+  <h1>☁ Scratch クラウド変数履歴ビューア</h1>
+  <p class="desc">プロジェクトIDを入力すると、Scratchのクラウド変数ログ (clouddata.scratch.mit.edu) から取得した履歴を表示します。</p>
 
-<input id="projectId" placeholder="Project ID">
-<input id="username" placeholder="Scratch Username">
-<input id="sessionId" type="password" placeholder="Session ID">
-<input id="varA" value="A">
-<input id="varB" value="B">
+  <div class="controls">
+    <div class="field">
+      <label for="projectId">プロジェクトID</label>
+      <input id="projectId" type="text" placeholder="例: 1332850073" inputmode="numeric">
+    </div>
+    <div class="field" style="max-width:100px;">
+      <label for="limit">limit</label>
+      <input id="limit" type="number" value="40" min="1" max="100">
+    </div>
+    <div class="field" style="max-width:100px;">
+      <label for="offset">offset</label>
+      <input id="offset" type="number" value="0" min="0">
+    </div>
+    <button id="fetchBtn">取得</button>
+  </div>
 
-<button onclick="connectCloud()">接続</button>
+  <div id="status"></div>
 
-<div>
-<p>A: <span id="a">-</span></p>
-<p>B: <span id="b">-</span></p>
+  <table id="resultTable" style="display:none;">
+    <thead>
+      <tr>
+        <th>時刻</th>
+        <th>ユーザー</th>
+        <th>操作</th>
+        <th>変数名</th>
+        <th>値</th>
+      </tr>
+    </thead>
+    <tbody id="resultBody"></tbody>
+  </table>
+
+  <div class="raw-toggle" id="rawToggle" style="display:none;">▸ 生のJSONを表示</div>
+  <pre id="rawOutput"></pre>
 </div>
 
-<div id="log"></div>
-
 <script>
-let ws;
-let lastA = null;
+const projectIdInput = document.getElementById('projectId');
+const limitInput = document.getElementById('limit');
+const offsetInput = document.getElementById('offset');
+const fetchBtn = document.getElementById('fetchBtn');
+const statusEl = document.getElementById('status');
+const table = document.getElementById('resultTable');
+const tbody = document.getElementById('resultBody');
+const rawToggle = document.getElementById('rawToggle');
+const rawOutput = document.getElementById('rawOutput');
 
-function log(msg){
-  const el=document.getElementById("log");
-  el.innerHTML += msg + "<br>";
-  el.scrollTop = el.scrollHeight;
+let rawVisible = false;
+rawToggle.addEventListener('click', () => {
+  rawVisible = !rawVisible;
+  rawOutput.style.display = rawVisible ? 'block' : 'none';
+  rawToggle.textContent = (rawVisible ? '▾ 生のJSONを隠す' : '▸ 生のJSONを表示');
+});
+
+function verbClass(verb) {
+  if (verb === 'set_var') return 'verb-set';
+  if (verb === 'create_var') return 'verb-create';
+  if (verb === 'del_var') return 'verb-del';
+  return '';
 }
 
-function connectCloud(){
-  const projectId=document.getElementById("projectId").value;
-  const username=document.getElementById("username").value;
-  const varA=document.getElementById("varA").value;
-  const varB=document.getElementById("varB").value;
-
-  ws=new WebSocket("wss://clouddata.scratch.mit.edu");
-
-  ws.onopen=()=>{
-    log("接続成功");
-    ws.send(JSON.stringify({
-      method:"handshake",
-      user:username,
-      project_id:projectId
-    })+"\n");
+function verbLabel(verb) {
+  const map = {
+    set_var: 'set',
+    create_var: 'create',
+    del_var: 'delete',
+    rename_var: 'rename'
   };
+  return map[verb] || verb;
+}
 
-  ws.onmessage=(event)=>{
-    const lines=event.data.trim().split("\n");
+function formatTimestamp(ts) {
+  if (typeof ts !== 'number') return String(ts);
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`;
+}
 
-    for(const line of lines){
-      try{
-        const msg=JSON.parse(line);
+async function fetchLogs() {
+  const projectId = projectIdInput.value.trim();
+  const limit = limitInput.value || 40;
+  const offset = offsetInput.value || 0;
 
-        if(msg.name==="☁ "+varA){
-          document.getElementById("a").textContent=msg.value;
+  if (!projectId) {
+    statusEl.textContent = 'プロジェクトIDを入力してください。';
+    statusEl.classList.add('error');
+    return;
+  }
 
-          if(msg.value!==lastA){
-            lastA=msg.value;
+  fetchBtn.disabled = true;
+  statusEl.classList.remove('error');
+  statusEl.textContent = '取得中...';
+  table.style.display = 'none';
+  rawToggle.style.display = 'none';
+  tbody.innerHTML = '';
 
-            const value=Math.floor(Math.random()*10)+1;
+  const url = `https://clouddata.scratch.mit.edu/logs?projectid=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
 
-            ws.send(JSON.stringify({
-              method:"set",
-              name:"☁ "+varB,
-              value:String(value),
-              user:username,
-              project_id:projectId
-            })+"\n");
-
-            document.getElementById("b").textContent=value;
-            log("B="+value+" を送信");
-          }
-        }
-      }catch(e){}
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`HTTPエラー: ${res.status}`);
     }
-  };
+    const text = await res.text();
+    rawOutput.textContent = text;
 
-  ws.onerror=(e)=>log("エラー");
-  ws.onclose=()=>log("切断");
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('レスポンスをJSONとして解析できませんでした。');
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      statusEl.textContent = 'データが見つかりませんでした（クラウド変数の履歴が無い、またはプロジェクトIDが間違っている可能性があります）。';
+      rawToggle.style.display = 'block';
+      return;
+    }
+
+    data.forEach(entry => {
+      const tr = document.createElement('tr');
+
+      const tdTime = document.createElement('td');
+      tdTime.className = 'mono';
+      tdTime.textContent = formatTimestamp(entry.timestamp);
+
+      const tdUser = document.createElement('td');
+      tdUser.textContent = entry.user ?? '-';
+
+      const tdVerb = document.createElement('td');
+      tdVerb.className = verbClass(entry.verb);
+      tdVerb.textContent = verbLabel(entry.verb);
+
+      const tdName = document.createElement('td');
+      tdName.className = 'mono';
+      tdName.textContent = entry.name ?? '-';
+
+      const tdValue = document.createElement('td');
+      tdValue.className = 'mono';
+      tdValue.textContent = (entry.value !== undefined) ? entry.value : '-';
+
+      tr.append(tdTime, tdUser, tdVerb, tdName, tdValue);
+      tbody.appendChild(tr);
+    });
+
+    table.style.display = 'table';
+    rawToggle.style.display = 'block';
+    statusEl.textContent = `${data.length} 件のログを取得しました。`;
+  } catch (err) {
+    statusEl.textContent = `エラー: ${err.message}（ブラウザのCORS制限や、プロジェクトIDが非公開/存在しない場合があります）`;
+    statusEl.classList.add('error');
+  } finally {
+    fetchBtn.disabled = false;
+  }
 }
+
+fetchBtn.addEventListener('click', fetchLogs);
+projectIdInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') fetchLogs();
+});
 </script>
 </body>
 </html>
