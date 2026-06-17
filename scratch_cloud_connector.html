@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scratch Cloud Connector</title>
+<style>
+body{font-family:sans-serif;max-width:900px;margin:20px auto;padding:20px}
+input,button{padding:8px;margin:4px;width:100%}
+#log{height:300px;overflow:auto;border:1px solid #ccc;padding:10px}
+</style>
+</head>
+<body>
+<h1>Scratch Cloud Connector (JS版)</h1>
+
+<input id="projectId" placeholder="Project ID">
+<input id="username" placeholder="Scratch Username">
+<input id="sessionId" type="password" placeholder="Session ID">
+<input id="varA" value="A">
+<input id="varB" value="B">
+
+<button onclick="connectCloud()">接続</button>
+
+<div>
+<p>A: <span id="a">-</span></p>
+<p>B: <span id="b">-</span></p>
+</div>
+
+<div id="log"></div>
+
+<script>
+let ws;
+let lastA = null;
+
+function log(msg){
+  const el=document.getElementById("log");
+  el.innerHTML += msg + "<br>";
+  el.scrollTop = el.scrollHeight;
+}
+
+function connectCloud(){
+  const projectId=document.getElementById("projectId").value;
+  const username=document.getElementById("username").value;
+  const varA=document.getElementById("varA").value;
+  const varB=document.getElementById("varB").value;
+
+  ws=new WebSocket("wss://clouddata.scratch.mit.edu");
+
+  ws.onopen=()=>{
+    log("接続成功");
+    ws.send(JSON.stringify({
+      method:"handshake",
+      user:username,
+      project_id:projectId
+    })+"\n");
+  };
+
+  ws.onmessage=(event)=>{
+    const lines=event.data.trim().split("\n");
+
+    for(const line of lines){
+      try{
+        const msg=JSON.parse(line);
+
+        if(msg.name==="☁ "+varA){
+          document.getElementById("a").textContent=msg.value;
+
+          if(msg.value!==lastA){
+            lastA=msg.value;
+
+            const value=Math.floor(Math.random()*10)+1;
+
+            ws.send(JSON.stringify({
+              method:"set",
+              name:"☁ "+varB,
+              value:String(value),
+              user:username,
+              project_id:projectId
+            })+"\n");
+
+            document.getElementById("b").textContent=value;
+            log("B="+value+" を送信");
+          }
+        }
+      }catch(e){}
+    }
+  };
+
+  ws.onerror=(e)=>log("エラー");
+  ws.onclose=()=>log("切断");
+}
+</script>
+</body>
+</html>
