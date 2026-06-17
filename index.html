@@ -241,14 +241,42 @@ async function fetchLogs() {
   rawToggle.style.display = 'none';
   tbody.innerHTML = '';
 
-  const url = `https://clouddata.scratch.mit.edu/logs?projectid=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
+  const targetUrl = `https://clouddata.scratch.mit.edu/logs?projectid=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
+
+  // clouddata.scratch.mit.edu はブラウザからの直接fetchにCORSヘッダーを返さないため、
+  // 複数のCORSプロキシを順番に試す。
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+  ];
+
+  let text = null;
+  let lastError = null;
+
+  for (const proxyUrl of proxies) {
+    try {
+      const res = await fetch(proxyUrl);
+      if (!res.ok) {
+        lastError = new Error(`HTTPエラー: ${res.status}`);
+        continue;
+      }
+      const t = await res.text();
+      if (t && t.trim().startsWith('[')) {
+        text = t;
+        break;
+      } else {
+        lastError = new Error('予期しない形式のレスポンス');
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
 
   try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`HTTPエラー: ${res.status}`);
+    if (text === null) {
+      throw lastError || new Error('すべての取得方法が失敗しました');
     }
-    const text = await res.text();
     rawOutput.textContent = text;
 
     let data;
@@ -294,7 +322,7 @@ async function fetchLogs() {
     rawToggle.style.display = 'block';
     statusEl.textContent = `${data.length} 件のログを取得しました。`;
   } catch (err) {
-    statusEl.textContent = `エラー: ${err.message}（ブラウザのCORS制限や、プロジェクトIDが非公開/存在しない場合があります）`;
+    statusEl.textContent = `エラー: ${err.message}（複数のプロキシ経由で試しましたが取得できませんでした。プロジェクトIDが間違っている可能性もあります）`;
     statusEl.classList.add('error');
   } finally {
     fetchBtn.disabled = false;
