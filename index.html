@@ -244,39 +244,63 @@ async function fetchLogs() {
   const targetUrl = `https://clouddata.scratch.mit.edu/logs?projectid=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
 
   // clouddata.scratch.mit.edu はブラウザからの直接fetchにCORSヘッダーを返さないため、
-  // 複数のCORSプロキシを順番に試す。
+  // 複数のCORSプロキシに同時にリクエストし、最初に成功したものを採用する。
   const proxies = [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-    `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`,
-    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+    { name: 'allorigins.win', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` },
+    { name: 'corsproxy.io', url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}` },
+    { name: 'codetabs.com', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}` },
   ];
 
-  let text = null;
+  const TIMEOUT_MS = 6000;
+
+  function fetchWithTimeout(proxy, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return fetch(proxy.url, { signal: controller.signal })
+      .then(async res => {
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(`HTTPエラー: ${res.status}`);
+        const t = await res.text();
+        if (!t || !t.trim().startsWith('[')) {
+          throw new Error('予期しない形式のレスポンス');
+        }
+        return { text: t, proxyName: proxy.name };
+      })
+      .catch(err => {
+        clearTimeout(timer);
+        throw err;
+      });
+  }
+
+  // Promise.any 相当（古い環境向けに自前実装）。全部失敗したら最後のエラーを投げる。
+  function firstSuccess(promises) {
+    return new Promise((resolve, reject) => {
+      let remaining = promises.length;
+      let lastErr = null;
+      promises.forEach(p => {
+        p.then(resolve).catch(err => {
+          lastErr = err;
+          remaining -= 1;
+          if (remaining === 0) reject(lastErr);
+        });
+      });
+    });
+  }
+
+  let result = null;
   let lastError = null;
 
-  for (const proxyUrl of proxies) {
-    try {
-      const res = await fetch(proxyUrl);
-      if (!res.ok) {
-        lastError = new Error(`HTTPエラー: ${res.status}`);
-        continue;
-      }
-      const t = await res.text();
-      if (t && t.trim().startsWith('[')) {
-        text = t;
-        break;
-      } else {
-        lastError = new Error('予期しない形式のレスポンス');
-      }
-    } catch (e) {
-      lastError = e;
-    }
+  try {
+    result = await firstSuccess(proxies.map(proxy => fetchWithTimeout(proxy, TIMEOUT_MS)));
+  } catch (e) {
+    lastError = e;
   }
 
   try {
-    if (text === null) {
+    if (result === null) {
       throw lastError || new Error('すべての取得方法が失敗しました');
     }
+    const { text, proxyName } = result;
     rawOutput.textContent = text;
 
     let data;
@@ -287,7 +311,7 @@ async function fetchLogs() {
     }
 
     if (!Array.isArray(data) || data.length === 0) {
-      statusEl.textContent = 'データが見つかりませんでした（クラウド変数の履歴が無い、またはプロジェクトIDが間違っている可能性があります）。';
+      statusEl.textContent = `データが見つかりませんでした（クラウド変数の履歴が無い、またはプロジェクトIDが間違っている可能性があります）。（経由: ${proxyName}）`;
       rawToggle.style.display = 'block';
       return;
     }
@@ -320,7 +344,7 @@ async function fetchLogs() {
 
     table.style.display = 'table';
     rawToggle.style.display = 'block';
-    statusEl.textContent = `${data.length} 件のログを取得しました。`;
+    statusEl.textContent = `${data.length} 件のログを取得しました。（経由: ${proxyName}）`;
   } catch (err) {
     statusEl.textContent = `エラー: ${err.message}（複数のプロキシ経由で試しましたが取得できませんでした。プロジェクトIDが間違っている可能性もあります）`;
     statusEl.classList.add('error');
