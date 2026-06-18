@@ -229,6 +229,7 @@ function buildProxyList(targetUrl) {
   return [
     { name: 'allorigins.win', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` },
     { name: 'codetabs.com', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}` },
+    { name: 'thingproxy', url: `https://thingproxy.freeboard.io/fetch/${targetUrl}` },
   ];
 }
 
@@ -352,7 +353,7 @@ async function fetchLogs() {
     rawToggle.style.display = 'block';
     statusEl.textContent = `${data.length} 件のログを取得しました。（経由: ${proxyName}）`;
   } catch (err) {
-    statusEl.textContent = `エラー: ${err.message}（allorigins.win / codetabs.com のどちらでも取得できませんでした。プロジェクトIDが間違っている可能性もあります）`;
+    statusEl.textContent = `エラー: ${err.message}（allorigins.win / codetabs.com / thingproxy のいずれでも取得できませんでした。プロジェクトIDが間違っている可能性もあります）`;
     statusEl.classList.add('error');
   } finally {
     fetchBtn.disabled = false;
