@@ -224,19 +224,16 @@ function formatTimestamp(ts) {
 }
 
 const PROXY_TIMEOUT_MS = 6000;
+const PROXY_NAME = 'allorigins.win';
 
-function buildProxyList(targetUrl) {
-  return [
-    { name: 'allorigins.win', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` },
-    { name: 'corsproxy.io', url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}` },
-    { name: 'codetabs.com', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}` },
-  ];
+function buildProxyUrl(targetUrl) {
+  return `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
 }
 
-function fetchWithTimeout(proxy, ms) {
+function fetchWithTimeout(url, ms) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(proxy.url, { signal: controller.signal })
+  return fetch(url, { signal: controller.signal })
     .then(async res => {
       clearTimeout(timer);
       if (!res.ok) throw new Error(`HTTPエラー: ${res.status}`);
@@ -244,7 +241,7 @@ function fetchWithTimeout(proxy, ms) {
       if (!t || !t.trim().startsWith('[')) {
         throw new Error('予期しない形式のレスポンス');
       }
-      return { text: t, proxyName: proxy.name };
+      return t;
     })
     .catch(err => {
       clearTimeout(timer);
@@ -253,28 +250,19 @@ function fetchWithTimeout(proxy, ms) {
 }
 
 // プロジェクトID・limit・offsetを指定してログを取得するヘルパー
-// allorigins.win を必ず最優先で使用し、失敗した場合のみ他のプロキシに順番にフォールバックする。
+// allorigins.win のみを使用する（他のプロキシへのフォールバックは行わない）。
 async function fetchCloudLogs(projectId, limit, offset) {
   const targetUrl = `https://clouddata.scratch.mit.edu/logs?projectid=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
-  const proxies = buildProxyList(targetUrl); // 先頭が allorigins.win 固定
+  const proxyUrl = buildProxyUrl(targetUrl);
 
-  let lastError = null;
-  for (const proxy of proxies) {
-    try {
-      const { text, proxyName } = await fetchWithTimeout(proxy, PROXY_TIMEOUT_MS);
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error('レスポンスをJSONとして解析できませんでした。');
-      }
-      return { data, text, proxyName };
-    } catch (e) {
-      lastError = e;
-      // allorigins.win が失敗した場合のみ次のプロキシへフォールバック
-    }
+  const text = await fetchWithTimeout(proxyUrl, PROXY_TIMEOUT_MS);
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error('レスポンスをJSONとして解析できませんでした。');
   }
-  throw lastError || new Error('すべてのプロキシで取得に失敗しました');
+  return { data, text, proxyName: PROXY_NAME };
 }
 
 async function fetchLogs() {
@@ -347,7 +335,7 @@ async function fetchLogs() {
     rawToggle.style.display = 'block';
     statusEl.textContent = `${data.length} 件のログを取得しました。（経由: ${proxyName}）`;
   } catch (err) {
-    statusEl.textContent = `エラー: ${err.message}（allorigins.win を含む全プロキシで取得できませんでした。プロジェクトIDが間違っている可能性もあります）`;
+    statusEl.textContent = `エラー: ${err.message}（allorigins.win経由で取得できませんでした。プロジェクトIDが間違っている可能性もあります）`;
     statusEl.classList.add('error');
   } finally {
     fetchBtn.disabled = false;
