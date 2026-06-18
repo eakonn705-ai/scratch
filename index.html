@@ -223,29 +223,32 @@ function formatTimestamp(ts) {
   return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`;
 }
 
-const PROXY_TIMEOUT_MS = 6000;
+const FETCH_TIMEOUT_MS = 8000;
 
-function buildProxyList(targetUrl) {
-  return [
-    { name: 'allorigins.win', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` },
-    { name: 'codetabs.com', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}` },
-    { name: 'thingproxy', url: `https://thingproxy.freeboard.io/fetch/${targetUrl}` },
-    { name: 'cors.lol', url: `https://api.cors.lol/?url=${encodeURIComponent(targetUrl)}` },
-  ];
-}
+// 自前のCloudflare Worker（Scratchクラウドログ専用プロキシ）
+const WORKER_BASE_URL = 'https://crimson-tooth-f921.18-kota-shobun.workers.dev/';
 
-function fetchWithTimeout(proxy, ms) {
+function fetchWithTimeout(url, ms) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(proxy.url, { signal: controller.signal })
+  return fetch(url, { signal: controller.signal })
     .then(async res => {
       clearTimeout(timer);
-      if (!res.ok) throw new Error(`HTTPエラー: ${res.status}`);
       const t = await res.text();
+      if (!res.ok) {
+        let message = `HTTPエラー: ${res.status}`;
+        try {
+          const errJson = JSON.parse(t);
+          if (errJson && errJson.error) message = errJson.error;
+        } catch (e) {
+          // JSONでなければそのままのメッセージを使う
+        }
+        throw new Error(message);
+      }
       if (!t || !t.trim().startsWith('[')) {
         throw new Error('予期しない形式のレスポンス');
       }
-      return { text: t, proxyName: proxy.name };
+      return t;
     })
     .catch(err => {
       clearTimeout(timer);
@@ -253,35 +256,19 @@ function fetchWithTimeout(proxy, ms) {
     });
 }
 
-// Promise.any 相当（古い環境向けに自前実装）。全部失敗したら最後のエラーを投げる。
-function firstSuccess(promises) {
-  return new Promise((resolve, reject) => {
-    let remaining = promises.length;
-    let lastErr = null;
-    promises.forEach(p => {
-      p.then(resolve).catch(err => {
-        lastErr = err;
-        remaining -= 1;
-        if (remaining === 0) reject(lastErr);
-      });
-    });
-  });
-}
-
 // プロジェクトID・limit・offsetを指定してログを取得するヘルパー
-// allorigins.win と codetabs.com に同時にリクエストし、最初に成功した方を採用する。
+// 自前のCloudflare Worker (Scratchクラウドログ専用プロキシ) のみを使用する。
 async function fetchCloudLogs(projectId, limit, offset) {
-  const targetUrl = `https://clouddata.scratch.mit.edu/logs?projectid=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
-  const proxies = buildProxyList(targetUrl);
+  const url = `${WORKER_BASE_URL}?projectid=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
 
-  const { text, proxyName } = await firstSuccess(proxies.map(proxy => fetchWithTimeout(proxy, PROXY_TIMEOUT_MS)));
+  const text = await fetchWithTimeout(url, FETCH_TIMEOUT_MS);
   let data;
   try {
     data = JSON.parse(text);
   } catch (e) {
     throw new Error('レスポンスをJSONとして解析できませんでした。');
   }
-  return { data, text, proxyName };
+  return { data, text, proxyName: '自前Worker (crimson-tooth-f921)' };
 }
 
 async function fetchLogs() {
@@ -354,7 +341,7 @@ async function fetchLogs() {
     rawToggle.style.display = 'block';
     statusEl.textContent = `${data.length} 件のログを取得しました。（経由: ${proxyName}）`;
   } catch (err) {
-    statusEl.textContent = `エラー: ${err.message}（allorigins.win / codetabs.com / thingproxy / cors.lol のいずれでも取得できませんでした。プロジェクトIDが間違っている可能性もあります）`;
+    statusEl.textContent = `エラー: ${err.message}（プロジェクトIDが間違っている可能性もあります）`;
     statusEl.classList.add('error');
   } finally {
     fetchBtn.disabled = false;
